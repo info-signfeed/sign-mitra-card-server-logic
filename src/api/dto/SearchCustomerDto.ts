@@ -6,6 +6,7 @@ export class SearchCustomerDto {
   number?: number;
   @IsNotEmpty()
   storeCode: string;
+  SecurityToken: string;
   // @IsOptional()
   // @IsNumber()
   // cardNumber?: number;

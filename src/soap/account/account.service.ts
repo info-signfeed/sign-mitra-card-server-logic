@@ -19,7 +19,7 @@ import {
   MoreThan,
 } from 'typeorm';
 import { RegisterCustomerEntity } from 'src/api/Entity/CustomerMasterEntity';
-import { RegisterCustomerDto } from 'src/api/dto/RegisterCustomerDto';
+
 import { UpdateCustomerDto } from 'src/api/dto/UpdateCustomerDto';
 import { SearchCustomerDto } from 'src/api/dto/SearchCustomerDto';
 import { LoyaltyPlanMasterEntity } from 'src/admin/Entity/LoyaltyPlanMasterEntity';
@@ -43,6 +43,8 @@ import timezone from 'dayjs/plugin/timezone';
 
 import moment from 'moment';
 import { BonusAmountManageMasterEntity } from 'src/api/Entity/BonusAmountManageMatserEntity';
+import { JwtService } from '@nestjs/jwt';
+import { RegisterCustomerDto } from 'src/api/dto/RegisterCustomerDto';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const otpStore = new Map<
@@ -67,6 +69,7 @@ export class AccountService {
   private readonly templateId = '683e9f5f8203a1605e06d1a7'; // Register template
   httpService: any;
   constructor(
+    private readonly jwtService: JwtService,
     @InjectRepository(RegisterCustomerEntity)
     private readonly RegisterCustomerEntityRepository: Repository<RegisterCustomerEntity>,
     @InjectRepository(LoyaltyPlanMasterEntity)
@@ -93,11 +96,45 @@ export class AccountService {
     private readonly BonusAmountManageMasterEntityRepository: Repository<BonusAmountManageMasterEntity>,
   ) {}
 
-  async registerCustomer(req: any, registerCustomerDto: RegisterCustomerDto) {
-    const companyId = registerCustomerDto.companyId;
-    const userId = registerCustomerDto.userId;
+  async registerCustomer(requestData: RegisterCustomerDto) {
+    console.log('ll', requestData);
+    const securityToken = requestData.SecurityToken;
+    console.log('securityToken: ', securityToken);
+    if (!securityToken) {
+      return {
+        Response: {
+          ReturnCode: 401,
+          ReturnMessage: 'SecurityToken is missing',
+          SmsStatus: -1,
+          EmailStatus: 0,
+          TPEnrollStatus: 0,
+        },
+      };
+    }
 
-    const { mobileNumber, cardNumber, planId } = registerCustomerDto;
+    let decodedToken: any;
+    try {
+      decodedToken = this.jwtService.verify(securityToken, {
+        secret: process.env.JWT_SECRET || 'yourSecretKey', // match signing secret
+      });
+
+      console.log('decodedToken: ', decodedToken);
+    } catch (err) {
+      console.error('JWT verification failed:', err.message);
+      return {
+        Response: {
+          ReturnCode: 403,
+          ReturnMessage: 'Invalid SecurityToken',
+          SmsStatus: -1,
+          EmailStatus: 0,
+          TPEnrollStatus: 0,
+        },
+      };
+    }
+
+    const companyId = decodedToken.companyId;
+    console.log('companyId: ', companyId);
+    const { mobileNumber, cardNumber, planId } = requestData;
 
     // Step 0: Check if mobile or card exists in RedeemPointEntity
     const redeemConflict = await this.RedeemPointEntityRepository.findOne({
@@ -133,11 +170,11 @@ export class AccountService {
     }
 
     // Step 0.2: Check if email exists, only if email is provided
-    if (registerCustomerDto.customerEmail) {
+    if (requestData.customerEmail) {
       const emailConflict = await this.RegisterCustomerEntityRepository.findOne(
         {
           where: {
-            customerEmail: registerCustomerDto.customerEmail,
+            customerEmail: requestData.customerEmail,
             companyId,
           },
         },
@@ -155,18 +192,17 @@ export class AccountService {
     const newCustomer = new RegisterCustomerEntity();
     newCustomer.mobileNumber = mobileNumber;
     newCustomer.cardNumber = cardNumber;
-    newCustomer.customerName = registerCustomerDto.customerName;
-    newCustomer.customerEmail = registerCustomerDto.customerEmail || null; // Safe assignment
-    newCustomer.gender = registerCustomerDto.gender;
-    newCustomer.birthDate = registerCustomerDto.birthDate ?? null;
-    newCustomer.anniversaryDate = registerCustomerDto.anniversaryDate ?? null;
+    newCustomer.customerName = requestData.customerName;
+    newCustomer.customerEmail = requestData.customerEmail || null; // Safe assignment
+    newCustomer.gender = requestData.gender;
+    newCustomer.birthDate = requestData.birthDate ?? null;
+    newCustomer.anniversaryDate = requestData.anniversaryDate ?? null;
     newCustomer.planId = planId ?? null;
-    newCustomer.cardType = registerCustomerDto.cardType;
-    newCustomer.termsAccepted = registerCustomerDto.termsAccepted;
+    newCustomer.cardType = Number(requestData.cardType);
+    newCustomer.termsAccepted = requestData.termsAccepted;
     newCustomer.status = true;
     newCustomer.companyId = companyId;
-    newCustomer.storeCode = registerCustomerDto.storeCode;
-    newCustomer.userId = userId;
+    newCustomer.storeCode = requestData.storeCode;
 
     const savedCustomer =
       await this.RegisterCustomerEntityRepository.save(newCustomer);
@@ -174,9 +210,10 @@ export class AccountService {
     let pointText = '0';
 
     if (planId) {
+      console.log('planId: ', planId);
       // Step 2: Plan-based registration
       const plan = await this.LoyaltyPlanMasterEntityRepository.findOne({
-        where: { id: planId, companyId, userId },
+        where: { id: planId, companyId },
       });
 
       if (!plan) {
@@ -209,7 +246,6 @@ export class AccountService {
       redeem.monthlyLimit = plan.monthlyUnit;
       redeem.storeCode = newCustomer.storeCode;
       redeem.companyId = companyId;
-      redeem.userId = userId;
 
       await this.RedeemPointEntityRepository.save(redeem);
 
@@ -218,7 +254,7 @@ export class AccountService {
         where: { id: companyId },
       });
 
-      if (registerCustomerDto.cardType === 1) {
+      if (requestData.cardType === 1) {
         try {
           await this.sendSmsTemplate(
             mobileNumber,
@@ -240,10 +276,11 @@ export class AccountService {
       // Step 3: No plan - Welcome email
       // await this.sendWelcomeEmail(savedCustomer.customerEmail, cardNumber);
     }
-
-    if (!planId && registerCustomerDto.cardType === 2) {
+    console.log('ll', requestData.cardType);
+    if (Number(requestData.cardType) === 2) {
       // Step 4: Loyalty card without plan
       const loyaltyRecord = new LoyaltyCardTopupMasterEntity();
+      console.log('loyaltyRecord: ', loyaltyRecord);
       loyaltyRecord.companyId = companyId;
       loyaltyRecord.mobileNumber = mobileNumber;
       loyaltyRecord.cardNumber = cardNumber;
@@ -252,7 +289,7 @@ export class AccountService {
       loyaltyRecord.topupPercent = 0;
       loyaltyRecord.topupValue = 0;
       loyaltyRecord.currentAmount = 0;
-      loyaltyRecord.storeCode = registerCustomerDto.storeCode;
+      loyaltyRecord.storeCode = requestData.storeCode;
       // loyaltyRecord.validTill = null;
 
       await this.LoyaltyCardTopupMasterEntityRepository.save(loyaltyRecord);
@@ -260,7 +297,7 @@ export class AccountService {
       const company = await this.CompanyMasterEntityRepository.findOne({
         where: { id: companyId },
       });
-      if (registerCustomerDto.cardType === 2) {
+      if (requestData.cardType === 2) {
         await this.sendSmsTemplate(
           mobileNumber,
           companyId,
@@ -593,8 +630,43 @@ export class AccountService {
     };
   }
 
-  async SearchCustomer(searchDto: SearchCustomerDto, req: any) {
-    const companyId = req.user.companyId;
+  async SearchCustomer(searchDto: SearchCustomerDto) {
+    const securityToken = searchDto.SecurityToken;
+    console.log('securityToken: ', securityToken);
+    if (!securityToken) {
+      return {
+        Response: {
+          ReturnCode: 401,
+          ReturnMessage: 'SecurityToken is missing',
+          SmsStatus: -1,
+          EmailStatus: 0,
+          TPEnrollStatus: 0,
+        },
+      };
+    }
+
+    let decodedToken: any;
+    try {
+      decodedToken = this.jwtService.verify(securityToken, {
+        secret: process.env.JWT_SECRET || 'yourSecretKey', // match signing secret
+      });
+
+      console.log('decodedToken: ', decodedToken);
+    } catch (err) {
+      console.error('JWT verification failed:', err.message);
+      return {
+        Response: {
+          ReturnCode: 403,
+          ReturnMessage: 'Invalid SecurityToken',
+          SmsStatus: -1,
+          EmailStatus: 0,
+          TPEnrollStatus: 0,
+        },
+      };
+    }
+
+    const companyId = decodedToken.companyId;
+    console.log('companyId: ', companyId);
     const { number } = searchDto;
 
     if (!number) {

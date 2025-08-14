@@ -31,7 +31,7 @@ import { SoapAuthModule } from './soap/auth/soap.auth.module';
         port: 3306,
         username: 'root',
         password: '1234',
-        database: 'sign_mitra',
+        database: 'sign_mitra_logic',
         entities: [join(__dirname, '**', '*Entity.{ts,js}')],
         synchronize: false,
         logging: true,

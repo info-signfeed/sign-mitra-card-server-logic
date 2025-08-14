@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsString,
   IsEmail,
@@ -25,6 +26,8 @@ export class RegisterCustomerDto {
   @IsEnum(['male', 'female', 'other'])
   gender: 'male' | 'female' | 'other';
 
+  @IsNumber()
+  @Type(() => Number)
   cardType: number;
   @IsOptional()
   @IsString()
@@ -36,12 +39,13 @@ export class RegisterCustomerDto {
   @IsOptional()
   @IsNumber()
   planId?: number;
-  userId: number;
-  companyId: number;
+  // userId: number;
+  // companyId: number;
   status: boolean;
 
   @IsBoolean()
   termsAccepted: boolean;
   @IsNotEmpty()
   storeCode: string;
+  SecurityToken: string;
 }

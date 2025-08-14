@@ -25,14 +25,12 @@ export class AccountController {
     @Inject(Request) private readonly req: Request,
   ) {}
   @Post('register-customer-xml')
-  // @UseGuards(JwtAuthGuard)
   async registerCustomerXml(@Req() req: any, @Body() body: string) {
     // Step 1: Parse XML to JS object
     const parsed = await xml2js.parseStringPromise(body, {
       explicitArray: false,
     });
     const requestData = parsed?.Request || {};
-
     // Step 2: Map XML fields to DTO
     const registerCustomerDto = {
       mobileNumber: requestData.MobileNo,
@@ -43,30 +41,24 @@ export class AccountController {
       gender: requestData.Gender,
       birthDate: requestData.BirthDate || null,
       anniversaryDate: requestData.AnniversaryDate || null,
-      cardType: requestData.CustomerTypeCode === 'Loyalty' ? 2 : 1,
+      cardType: requestData.CustomerTypeCode,
       termsAccepted: true,
       storeCode: requestData.StoreCode,
-      userId: 3,
-      companyId: 9,
+
       status: true,
+      SecurityToken: requestData.SecurityToken,
+      // userId: 0, // you might decode from token or set from auth
+      // companyId: 0, // same as above
     };
 
     // Step 3: Call your existing JSON-based function
-    const result = await this._accountService.registerCustomer(
-      req,
-      registerCustomerDto,
-    );
+    const result =
+      await this._accountService.registerCustomer(registerCustomerDto);
 
     console.log('result: ', result);
-    // Step 4: Error Code Mapping
-    const errorCodeMap: Record<number, string> = {
-      0: 'Success',
-      125: 'Input parameters are not provided correctly.',
-      247: 'Membership card number missed.',
-      186: 'Membership card number verification failed.',
-    };
+
     const returnCode = result.status === 200 ? 0 : 299; // Example: map based on your logic
-    const returnMessage = errorCodeMap[returnCode] || 'Unknown error';
+    const returnMessage = result.message;
 
     // Step 5: Convert result to XML response
     const xmlResponse = {
@@ -76,8 +68,6 @@ export class AccountController {
         SmsStatus: result.status === 200 ? 0 : -1,
         EmailStatus: 0,
         TPEnrollStatus: result.status === 200 ? 1 : 0,
-        // MemberShipNumber: result.membershipNumber || '',
-        // BonusPoints: result.points || 0,
       },
     };
 
@@ -85,8 +75,7 @@ export class AccountController {
     return builder.buildObject(xmlResponse);
   }
   @Post('search-customer-xml')
-  // @UseGuards(JwtAuthGuard)
-  async searchCustomerXml(@Req() req: any, @Body() body: string) {
+  async searchCustomerXml(@Body() body: string) {
     // Step 1: Parse XML to JS object
     const parsed = await xml2js.parseStringPromise(body, {
       explicitArray: false,
@@ -97,13 +86,11 @@ export class AccountController {
     const searchCustomerDto = {
       number: requestData.Number ? Number(requestData.Number) : undefined,
       storeCode: requestData.StoreCode,
+      SecurityToken: requestData.SecurityToken,
     };
 
     // Step 3: Call your existing JSON-based function
-    const result = await this._accountService.SearchCustomer(
-      searchCustomerDto,
-      req,
-    );
+    const result = await this._accountService.SearchCustomer(searchCustomerDto);
 
     // Step 4: Error Code Mapping
     const errorCodeMap: Record<number, string> = {
@@ -111,8 +98,9 @@ export class AccountController {
       125: 'Input parameters are not provided correctly.',
       404: 'Customer not found.',
     };
+    const status = (result as any).status;
+    const returnCode = status === 200 ? 0 : 404;
 
-    const returnCode = result.status === 200 ? 0 : 404; // Example logic
     const returnMessage = errorCodeMap[returnCode] || 'Unknown error';
 
     // Step 5: Convert result to XML response
