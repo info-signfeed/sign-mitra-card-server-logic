@@ -963,7 +963,7 @@ export class AccountService {
 
         const topupsForBalance =
           await this.LoyaltyCardTopupMasterEntityRepository.find({
-            where: { cardNumber, cardType: 'loyalty' },
+            where: { cardNumber, cardType: 'loyalty', storeCode },
           });
 
         const totalBalance = topupsForBalance.reduce(
@@ -1454,7 +1454,7 @@ export class AccountService {
     } else {
       const loyaltyPlans =
         await this.LoyaltyCardTopupMasterEntityRepository.find({
-          where: { mobileNumber },
+          where: { mobileNumber, storeCode },
         });
       currentAmount = loyaltyPlans.reduce(
         (sum, lp) => sum + Number(lp.currentAmount || 0),
