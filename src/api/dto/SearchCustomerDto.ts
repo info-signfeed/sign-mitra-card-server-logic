@@ -4,7 +4,7 @@ export class SearchCustomerDto {
   @IsOptional()
   @IsNumber()
   number?: number;
-  @IsNotEmpty()
+  // @IsNotEmpty()
   storeCode: string;
   SecurityToken: string;
   // @IsOptional()

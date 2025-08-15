@@ -6,6 +6,6 @@ export class AddBonusPointDto {
   bonusType: string;
   @IsOptional()
   expiryDate: Date;
-  @IsNotEmpty()
+  // @IsNotEmpty()
   storeCode: string;
 }

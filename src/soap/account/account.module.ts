@@ -20,6 +20,8 @@ import { PassportModule } from '@nestjs/passport';
 import { jwtConfig } from '../auth/jwt.config';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from '../auth/local.strategy';
+import { BillMasterEntity } from './Entity/billMasterEntity';
+import { BillItemEntity } from './Entity/billItemMasterEntity';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { JwtStrategy } from '../auth/local.strategy';
       LoyaltyCardTypeEntity,
       CompanyMasterEntity,
       CompanySmsTemplateEntity,
+      BillMasterEntity,
+      BillItemEntity,
     ]),
     AdminModule,
     ApiModule,

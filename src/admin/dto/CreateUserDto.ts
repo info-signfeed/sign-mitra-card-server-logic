@@ -17,7 +17,7 @@ export class CreateUserDto {
   userDepartment: string;
   @IsNotEmpty()
   userRole: number;
-  @IsNotEmpty()
+  // @IsNotEmpty()
   storeCode: string;
 
   // userType: string;

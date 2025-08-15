@@ -17,6 +17,6 @@ export class CreateRedeemPointDto {
   redeemPoint: number;
   lastRedeemDate: Date;
   userId: number;
-  @IsNotEmpty()
+  // @IsNotEmpty()
   storeCode: string;
 }

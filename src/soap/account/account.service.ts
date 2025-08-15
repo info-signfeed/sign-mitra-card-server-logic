@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -45,6 +46,8 @@ import moment from 'moment';
 import { BonusAmountManageMasterEntity } from 'src/api/Entity/BonusAmountManageMatserEntity';
 import { JwtService } from '@nestjs/jwt';
 import { RegisterCustomerDto } from 'src/api/dto/RegisterCustomerDto';
+import { BillMasterEntity } from './Entity/billMasterEntity';
+import { BillItemEntity } from './Entity/billItemMasterEntity';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const otpStore = new Map<
@@ -94,6 +97,10 @@ export class AccountService {
     private readonly BonusRecordMasterEntityRepository: Repository<BonusRecordMasterEntity>,
     @InjectRepository(BonusAmountManageMasterEntity)
     private readonly BonusAmountManageMasterEntityRepository: Repository<BonusAmountManageMasterEntity>,
+    @InjectRepository(BillMasterEntity)
+    private readonly BillMasterEntityRepository: Repository<BillMasterEntity>,
+    @InjectRepository(BillItemEntity)
+    private readonly BillItemEntityRepository: Repository<BillItemEntity>,
   ) {}
 
   async registerCustomer(requestData: RegisterCustomerDto) {
@@ -728,17 +735,19 @@ export class AccountService {
       const topups = await this.LoyaltyCardTopupMasterEntityRepository.find({
         where: {
           mobileNumber: customer.mobileNumber,
-          cardNumber: customer.cardNumber,
+          // cardNumber: customer.cardNumber,
           companyId,
           storeCode: searchDto.storeCode,
         },
       });
+      console.log('topups: ', topups);
 
       totalLoyaltyPoints = topups.reduce(
         (sum, topup) => sum + Number(topup.currentAmount || 0),
         0,
       );
     }
+    console.log('totalLoyaltyPoints: ', totalLoyaltyPoints);
 
     return {
       message: 'success',
@@ -754,7 +763,7 @@ export class AccountService {
     redeemValue: number,
     mobileNumber?: number,
     cardNumber?: number,
-    companyId?: number, // coming from req.user
+    companyId?: number,
     storeCode?: string,
   ) {
     console.log('storeCode: ', storeCode);
@@ -1197,11 +1206,9 @@ export class AccountService {
               .orderBy('tier.toAmount', 'DESC')
               .getOne();
         }
-
         if (!tier) {
           throw new BadRequestException('No tier matched for shopping amount.');
         }
-
         const topUpValue = (value * tier.topupPercent) / 100;
 
         let validTill;
@@ -1290,8 +1297,9 @@ export class AccountService {
     }
   }
 
+  // --- SERVICE ---
   async sendOtpAndPrepareRedemption(
-    mobileNumber: number,
+    mobileNumber: number | undefined,
     storeCode: string,
     redeemPayload: {
       value: number;
@@ -1299,41 +1307,65 @@ export class AccountService {
       cardNumber?: number;
     },
   ) {
-    if (!mobileNumber) {
-      throw new BadRequestException('Mobile number is required');
-    }
-
-    const cardNumber = redeemPayload.cardNumber;
-    if (!cardNumber) {
+    if (!mobileNumber && !redeemPayload?.cardNumber) {
       throw new BadRequestException(
-        'Card number is required to check monthly limit',
+        'Either mobile number or card number is required',
       );
     }
 
-    // Step 1: Get cardType from registered customer table
+    // If we only got mobile, fetch cardNumber
+    let cardNumber = redeemPayload?.cardNumber;
+    if (!cardNumber && mobileNumber) {
+      const customerByMobile =
+        await this.RegisterCustomerEntityRepository.findOne({
+          where: { mobileNumber },
+        });
+      if (!customerByMobile) {
+        throw new BadRequestException(
+          'Customer not found for the given mobile number',
+        );
+      }
+      cardNumber = Number(customerByMobile.cardNumber);
+    }
+
+    // If we only got card, fetch mobileNumber
+    if (!mobileNumber && cardNumber) {
+      const customerByCard =
+        await this.RegisterCustomerEntityRepository.findOne({
+          where: { cardNumber },
+        });
+      if (!customerByCard) {
+        throw new BadRequestException(
+          'Customer not found for the given card number',
+        );
+      }
+      mobileNumber = Number(customerByCard.mobileNumber);
+    }
+
+    if (!cardNumber || !mobileNumber) {
+      throw new BadRequestException(
+        'Unable to determine both card and mobile number',
+      );
+    }
+
+    // ✅ Fetch customer by either
     const customer = await this.RegisterCustomerEntityRepository.findOne({
-      where: { cardNumber: cardNumber },
+      where: [{ mobileNumber }, { cardNumber }],
     });
-
     if (!customer) {
-      throw new BadRequestException(
-        'Registered customer not found for this card number',
-      );
+      throw new BadRequestException('Registered customer not found');
     }
 
     const cardType = Number(customer.cardType);
     const redeemValue = Number(redeemPayload.redeemValue);
 
-    // Step 2: Check plan for is_one_time_redeem
+    // ✅ Plan check
     const plan = await this.LoyaltyPlanMasterEntityRepository.findOne({
       where: { id: customer.planId, companyId: customer.companyId },
     });
-    console.log('plan: ', plan);
-
     const isOneTimeRedeem = plan?.isOneTimeRedeem === 1;
-    console.log('isOneTimeRedeem: ', isOneTimeRedeem);
 
-    // Step 3: If plan is NOT one-time redeem, perform monthly limit validation
+    // ✅ Monthly limit logic
     if (!isOneTimeRedeem && cardType === 1) {
       let monthlyLimit = 0;
 
@@ -1346,33 +1378,28 @@ export class AccountService {
 
       if (cardType === 1) {
         const purchasePlan = await this.RedeemPointEntityRepository.findOne({
-          where: { cardNumber: cardNumber },
+          where: { cardNumber },
         });
-
         if (!purchasePlan) {
           throw new BadRequestException(
             'No purchase plan found for the given card number',
           );
         }
-
         monthlyLimit = Number(purchasePlan.monthlyLimit);
       } else if (cardType === 2) {
         const loyaltyPlans =
           await this.LoyaltyCardTopupMasterEntityRepository.find({
-            where: { cardNumber: cardNumber },
+            where: { mobileNumber },
           });
-
-        if (!loyaltyPlans || loyaltyPlans.length === 0) {
+        if (!loyaltyPlans.length) {
           throw new BadRequestException(
             'No loyalty plan records found for the given card number',
           );
         }
-
         const currentMonthPlans = loyaltyPlans.filter((lp) => {
           const createdAt = new Date(lp.createdAt);
           return createdAt >= startOfMonth && createdAt < endOfMonth;
         });
-
         monthlyLimit = currentMonthPlans.reduce(
           (sum, plan) => sum + Number(plan.currentAmount || 0),
           0,
@@ -1381,17 +1408,16 @@ export class AccountService {
         throw new BadRequestException('Invalid card type');
       }
 
-      // Step 4: Validate redemption limit
       if (redeemValue < 0) {
         throw new BadRequestException('Redeem value must not be negative');
       }
 
       const transactions = await this.RedeemTransactionEntityRepository.find({
         where: {
-          cardNumber: cardNumber,
+          cardNumber,
           createdAt: Between(startOfMonth, endOfMonth),
           status: 'dr',
-          planId: customer.planId, // <-- key fix
+          planId: customer.planId,
         },
       });
       const totalRedeemed = transactions.reduce(
@@ -1400,9 +1426,7 @@ export class AccountService {
       );
 
       if (totalRedeemed + redeemValue > monthlyLimit) {
-        console.log('kl', monthlyLimit, totalRedeemed);
         const remainingLimit = Math.max(0, monthlyLimit - totalRedeemed);
-        console.log('remainingLimit: ', remainingLimit);
         return {
           message: `You have exceeded your monthly redemption limit. You can redeem only ₹${remainingLimit} this month.`,
           status: 403,
@@ -1410,63 +1434,41 @@ export class AccountService {
       }
     }
 
-    // Step 5: Generate OTP and store it
+    // ✅ OTP logic
     const otp = Math.floor(10000 + Math.random() * 90000).toString();
     const expiresAt = Date.now() + 5 * 60 * 1000;
 
     otpStore.set(mobileNumber.toString(), {
       otp,
       expiresAt,
-      redeemPayload: {
-        ...redeemPayload,
-        mobileNumber,
-      },
+      redeemPayload: { ...redeemPayload, mobileNumber },
     });
-    // --- NEW: fetch & compute current balance ---
+
+    // ✅ Balance calculation
     let currentAmount = 0;
     if (cardType === 1) {
-      // for one‑time / purchase plans we store “pendingPoints” on RedeemPointEntity
       const purchasePlan = await this.RedeemPointEntityRepository.findOne({
-        where: { cardNumber },
+        where: { mobileNumber },
       });
-      if (!purchasePlan) {
-        throw new BadRequestException(
-          'No purchase plan found for computing balance',
-        );
-      }
-      currentAmount = Number(purchasePlan.pendingPoint || 0);
-      console.log('currentAmount: ', currentAmount);
+      currentAmount = Number(purchasePlan?.pendingPoint || 0);
     } else {
-      // for top‑up cards we sum up all `currentAmount` fields this month (or overall)
       const loyaltyPlans =
         await this.LoyaltyCardTopupMasterEntityRepository.find({
-          where: { cardNumber },
+          where: { mobileNumber },
         });
       currentAmount = loyaltyPlans.reduce(
         (sum, lp) => sum + Number(lp.currentAmount || 0),
         0,
       );
-      console.log('currentAmount: ', currentAmount);
     }
-    // --- END new balance logic ---
+    console.log('currentAmount: ', currentAmount);
 
     try {
-      // 2. Fetch company details
       const company = await this.CompanyMasterEntityRepository.findOne({
         where: { id: customer.companyId },
       });
 
-      // Skip OTP SMS for cardType 2 when redeemValue is 0
       if (cardType === 2 && redeemValue === 0) {
-        console.log(
-          'kkk',
-          redeemPayload.value,
-          redeemValue,
-          mobileNumber,
-          cardNumber,
-          customer.companyId,
-          customer.id,
-        );
         return await this.shoppingWithoutOtpShopping(
           redeemPayload.value,
           redeemValue,
@@ -1474,12 +1476,9 @@ export class AccountService {
           cardNumber,
           storeCode,
           customer.companyId,
-          customer.id, // or userId if you pass it
+          customer.id,
         );
       }
-      // 1. Send OTP to email (optional)
-      // await this.sendOtpToEmail(customer.customerEmail, otp);
-      // 3. Send OTP SMS using point-redeem template
 
       await this.sendSmsTemplate(
         mobileNumber,
@@ -1489,7 +1488,7 @@ export class AccountService {
           customer_name: customer.customerName,
           loyalty_points: redeemPayload.redeemValue,
           company_name: company?.companyName || '',
-          otp: otp,
+          otp,
           valid_time: 5,
           current_amount: currentAmount,
         },
@@ -1497,19 +1496,23 @@ export class AccountService {
 
       return { message: 'success', status: 200 };
     } catch (error) {
-      console.error('Error sending OTP SMS:', error.message);
       throw new BadRequestException('Error sending OTP');
     }
   }
+
+  // --- CONTROLLER ---
 
   async verifyOtpAndRedeem(
     storeCode: string,
     mobileNumber: number,
     otp: string,
-    req: any,
+
+    securityToken: string,
   ) {
-    const companyId = req.user.companyId;
-    console.log('storeCode:2 ', storeCode);
+    const decodedToken = this.decodeSecurityToken(securityToken);
+    const companyId = decodedToken.companyId;
+    console.log('companyId: ', companyId);
+
     const stored = otpStore.get(mobileNumber.toString());
     console.log('stored: ', stored);
 
@@ -2164,5 +2167,278 @@ export class AccountService {
         `Expired top-up for card ${topup.cardNumber}: Deducted ${deduction}, Remaining ${topup.currentAmount}`,
       );
     }
+  }
+  // =======================================================================
+  async SearchCustomerPoint(searchDto: SearchCustomerDto) {
+    const { SecurityToken, number, storeCode } = searchDto;
+
+    if (!SecurityToken) {
+      return {
+        error: true,
+        errorCode: 401,
+        errorMessage: 'SecurityToken is missing',
+      };
+    }
+
+    let decodedToken: any;
+    try {
+      decodedToken = this.jwtService.verify(SecurityToken, {
+        secret: process.env.JWT_SECRET || 'yourSecretKey',
+      });
+    } catch {
+      return {
+        error: true,
+        errorCode: 403,
+        errorMessage: 'Invalid SecurityToken',
+      };
+    }
+
+    const companyId = decodedToken.companyId;
+    if (!number) {
+      return { error: true, errorCode: 125, errorMessage: 'MemID is required' };
+    }
+
+    const customer = await this.RegisterCustomerEntityRepository.findOne({
+      where: [
+        { mobileNumber: number, companyId, storeCode },
+        { cardNumber: number, companyId, storeCode },
+      ],
+    });
+
+    if (!customer) {
+      return {
+        error: true,
+        errorCode: 404,
+        errorMessage: 'Customer not found',
+      };
+    }
+
+    let availablePoints = 0;
+    let pointRate = 0.5;
+    let pointValue = 0;
+    let partnerName = decodedToken.companyName || 'Integration';
+
+    if (customer.cardType == 1) {
+      const purchasedPlan = await this.RedeemPointEntityRepository.findOne({
+        where: {
+          mobileNumber: customer.mobileNumber,
+          cardNumber: customer.cardNumber,
+          companyId,
+          storeCode,
+        },
+        order: { validTill: 'DESC' },
+      });
+
+      if (purchasedPlan) {
+        availablePoints = Number(purchasedPlan.pendingPoint || 0);
+        pointValue = availablePoints * pointRate;
+      }
+    } else if (customer.cardType == 2) {
+      const topups = await this.LoyaltyCardTopupMasterEntityRepository.find({
+        where: {
+          mobileNumber: customer.mobileNumber,
+          // cardNumber: customer.cardNumber,
+          companyId,
+          storeCode,
+        },
+      });
+
+      availablePoints = topups.reduce(
+        (sum, t) => sum + Number(t.currentAmount || 0),
+        0,
+      );
+      pointValue = availablePoints * pointRate;
+    }
+
+    return {
+      availablePoints,
+      pointRate,
+      pointValue,
+      partnerName,
+      memId: customer.mobileNumber || '',
+    };
+  }
+
+  private decodeSecurityToken(securityToken: string) {
+    if (!securityToken) {
+      throw new BadRequestException('SecurityToken is missing');
+    }
+
+    try {
+      return this.jwtService.verify(securityToken, {
+        secret: process.env.JWT_SECRET || 'yourSecretKey',
+      });
+    } catch (err) {
+      throw new UnauthorizedException('Invalid SecurityToken');
+    }
+  }
+  async UpdateCustomerFromXml(requestData: any) {
+    const { SecurityToken, MemberShipCardNumber, MobileNo, StoreCode } =
+      requestData;
+
+    // Token validation
+    if (!SecurityToken) {
+      return { returnCode: 124, returnMessage: 'Security token missing.' };
+    }
+
+    let decodedToken: any;
+    try {
+      decodedToken = this.jwtService.verify(SecurityToken, {
+        secret: process.env.JWT_SECRET || 'yourSecretKey',
+      });
+    } catch {
+      return {
+        returnCode: 124,
+        returnMessage: 'Security token verification failed.',
+      };
+    }
+
+    // Find by MemID
+    const memId = MemberShipCardNumber || MobileNo;
+    console.log('memId: ', memId);
+    const companyId = decodedToken.companyId;
+
+    const customer = await this.RegisterCustomerEntityRepository.findOne({
+      where: [
+        { mobileNumber: Number(memId), companyId, storeCode: StoreCode },
+        { cardNumber: Number(memId), companyId, storeCode: StoreCode },
+      ],
+    });
+
+    if (!customer) {
+      return { returnCode: 404, returnMessage: 'Customer not found.' };
+    }
+
+    // Update only allowed fields (not mobile/card)
+    customer.customerName =
+      `${requestData.FirstName} ${requestData.LastName || ''}`.trim();
+    customer.customerEmail = requestData.EmailId;
+    customer.gender = requestData.Gender;
+    customer.birthDate = requestData.DateOfBirth || null;
+    customer.anniversaryDate = requestData.AnniversaryDate || null;
+    customer.termsAccepted = true;
+    customer.status = true;
+
+    await this.RegisterCustomerEntityRepository.save(customer);
+
+    return { returnCode: 0, returnMessage: 'Success.' };
+  }
+  async verifyOtpOnly(memId: string, otp: string) {
+    const stored = otpStore.get(memId);
+
+    if (!stored) {
+      return { success: false, message: 'No OTP requested or OTP expired.' };
+    }
+    if (Date.now() > stored.expiresAt) {
+      return { success: false, message: 'OTP has expired.' };
+    }
+    if (stored.otp !== otp) {
+      return { success: false, message: 'Invalid OTP.' };
+    }
+
+    return { success: true, message: 'OTP verified successfully.' };
+  }
+  async verifyOtpAndRedeemXml(
+    storeCode: string,
+    memId: string,
+    otp: string,
+    securityToken: string,
+  ) {
+    const decodedToken = this.decodeSecurityToken(securityToken);
+    const companyId = decodedToken.companyId;
+
+    const customer = await this.RegisterCustomerEntityRepository.findOne({
+      where: [{ mobileNumber: Number(memId) }, { cardNumber: Number(memId) }],
+    });
+
+    if (!customer) throw new NotFoundException('Customer not found.');
+
+    const mobileNumber = customer.mobileNumber;
+    const stored = otpStore.get(mobileNumber.toString());
+
+    if (!stored)
+      throw new BadRequestException('No OTP requested or OTP expired.');
+    if (Date.now() > stored.expiresAt) {
+      otpStore.delete(mobileNumber.toString());
+      throw new BadRequestException('OTP has expired.');
+    }
+    if (stored.otp !== otp) throw new BadRequestException('Invalid OTP.');
+
+    // OTP is valid → delete and redeem
+    otpStore.delete(mobileNumber.toString());
+
+    return this.redeemPoints(
+      stored.redeemPayload.value,
+      stored.redeemPayload.redeemValue,
+      stored.redeemPayload.mobileNumber,
+      stored.redeemPayload.cardNumber,
+      companyId,
+      storeCode,
+    );
+  }
+  async saveBillWithItems(parsedRequest: any) {
+    const master = new BillMasterEntity();
+
+    master.userName = parsedRequest.UserName || '';
+    master.billNo = parsedRequest.BillNo;
+    master.transactionDate = new Date(parsedRequest.TransactionDate);
+    master.storeCode = parsedRequest.StoreCode;
+    master.memId = parsedRequest.MemID;
+    master.channel = parsedRequest.Channel;
+    master.customerType = parsedRequest.CustomerType;
+    master.billValue = isNaN(parseFloat(parsedRequest.BillValue))
+      ? 0
+      : parseFloat(parsedRequest.BillValue);
+    master.pointsRedeemed = isNaN(parseFloat(parsedRequest.PointsRedeemed))
+      ? null
+      : parseFloat(parsedRequest.PointsRedeemed);
+    master.pointsValueRedeemed = isNaN(
+      parseFloat(parsedRequest.PointsValueRedeemed),
+    )
+      ? null
+      : parseFloat(parsedRequest.PointsValueRedeemed);
+    master.countryCode = parsedRequest.CountryCode;
+    master.vouchTime = new Date(parsedRequest.VouchTime);
+    master.vouchNumber = parsedRequest.Vouch_Number;
+    master.discountCouponNo = parsedRequest.Discount_Coupon_No;
+
+    const savedMaster = await this.BillMasterEntityRepository.save(master);
+
+    const itemsArray = Array.isArray(
+      parsedRequest.TransactionItems.LogicTransactionItem,
+    )
+      ? parsedRequest.TransactionItems.LogicTransactionItem
+      : [parsedRequest.TransactionItems.LogicTransactionItem];
+
+    const items = itemsArray.map((item: any) => {
+      const billItem = new BillItemEntity();
+      billItem.billMaster = savedMaster;
+      billItem.itemType = item.ItemType;
+      billItem.itemQty = isNaN(parseFloat(item.ItemQty))
+        ? 0
+        : parseFloat(item.ItemQty);
+      billItem.unit = isNaN(parseFloat(item.Unit)) ? 0 : parseFloat(item.Unit);
+      billItem.itemDiscount = isNaN(parseFloat(item.ItemDiscount))
+        ? 0
+        : parseFloat(item.ItemDiscount);
+      billItem.itemTax = isNaN(parseFloat(item.ItemTax))
+        ? 0
+        : parseFloat(item.ItemTax);
+      billItem.totalPrice = isNaN(parseFloat(item.TotalPrice))
+        ? 0
+        : parseFloat(item.TotalPrice);
+      billItem.billedPrice = isNaN(parseFloat(item.BilledPrice))
+        ? 0
+        : parseFloat(item.BilledPrice);
+      billItem.department = item.Department;
+      billItem.group = item.Group;
+      billItem.category = item.Category;
+      billItem.itemId = item.ItemId;
+      return billItem;
+    });
+
+    await this.BillItemEntityRepository.save(items);
+
+    return savedMaster;
   }
 }

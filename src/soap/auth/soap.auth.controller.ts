@@ -1,45 +1,3 @@
-// import {
-//   Controller,
-//   Post,
-//   Body,
-//   UnauthorizedException,
-//   Res,
-// } from '@nestjs/common';
-// import { SoapAuthService } from './soap.auth.service';
-// import { Response } from 'express';
-
-// @Controller('logic/auth')
-// export class SoapAuthController {
-//   constructor(private readonly authService: SoapAuthService) {}
-
-//   @Post('login')
-//   async login(
-//     @Body() body: { username: string; password: string },
-//     @Res({ passthrough: true }) res: Response,
-//   ): Promise<{
-//     accessToken: string;
-//     companyId: number;
-//     userId: number;
-//     // roleId: number;
-//     roleName: string;
-//   }> {
-//     const user = await this.authService.validateUser(
-//       body.username,
-//       body.password,
-//     );
-//     if (!user) {
-//       throw new UnauthorizedException('Invalid credentials');
-//     }
-//     const accessToken = await this.authService.generateToken(user);
-//     return {
-//       accessToken,
-//       companyId: user.companyId,
-//       userId: user.userId,
-//       roleName: user.roleName,
-//     };
-//   }
-// }
-
 import {
   Controller,
   Post,
@@ -50,7 +8,7 @@ import {
 import { Request, Response } from 'express';
 import { SoapAuthService } from './soap.auth.service';
 
-@Controller('logic/auth')
+@Controller('logic')
 export class SoapAuthController {
   constructor(private readonly authService: SoapAuthService) {}
 

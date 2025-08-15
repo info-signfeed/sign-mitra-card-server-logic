@@ -45,7 +45,7 @@ export class RegisterCustomerDto {
 
   @IsBoolean()
   termsAccepted: boolean;
-  @IsNotEmpty()
+  // @IsNotEmpty()
   storeCode: string;
   SecurityToken: string;
 }

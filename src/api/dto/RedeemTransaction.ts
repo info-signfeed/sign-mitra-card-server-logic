@@ -10,6 +10,6 @@ export class RedeemedTransactionDto {
   @IsNotEmpty()
   @IsInt()
   redeemValue: number;
-  @IsNotEmpty()
+  // @IsNotEmpty()
   storeCode: string;
 }
