@@ -2464,7 +2464,55 @@ export class AccountService {
           storeCode: master.storeCode,
         });
 
-        await this.LoyaltyCardTopupMasterEntityRepository.save(newCard);
+        const savedTopup =
+          await this.LoyaltyCardTopupMasterEntityRepository.save(newCard);
+
+        // ✅ Send SMS here (copied from shoppingWithoutOtpShopping)
+        const customer = await this.RegisterCustomerEntityRepository.findOne({
+          where: { mobileNumber: existingCard.mobileNumber },
+        });
+
+        const customerName = customer?.customerName || 'Customer';
+        console.log('customerName: ', customerName);
+
+        try {
+          if (Number(existingCard.cardType) === 2) {
+            const company = await this.CompanyMasterEntityRepository.findOne({
+              where: { id: companyId },
+            });
+
+            console.log('company: ', company);
+            const allTopups =
+              await this.LoyaltyCardTopupMasterEntityRepository.find({
+                where: {
+                  cardNumber: existingCard.cardNumber,
+                  companyId: companyId,
+                },
+              });
+
+            const availablePoints = allTopups.reduce(
+              (sum, row) => sum + Number(row.currentAmount || 0),
+              0,
+            );
+            console.log('availablePoints: ', availablePoints);
+            await this.sendSmsTemplate(
+              existingCard.mobileNumber,
+              companyId,
+              'earn-loyalty-point-without-redeem',
+              {
+                customer_name: customerName || '',
+                company_name: company?.companyName || '',
+                loyalty_points: savedTopup.topupValue.toFixed(2),
+                available_points: availablePoints.toFixed(2),
+              },
+            );
+          }
+        } catch (error) {
+          console.error(
+            'Failed to send earn-loyalty-point-without-redeem SMS:',
+            error.message,
+          );
+        }
       }
     }
 
