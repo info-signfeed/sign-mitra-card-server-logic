@@ -2476,7 +2476,7 @@ export class AccountService {
         console.log('customerName: ', customerName);
 
         try {
-          if (Number(existingCard.cardType) === 2) {
+          if (existingCard.cardType === 'loyalty') {
             const company = await this.CompanyMasterEntityRepository.findOne({
               where: { id: companyId },
             });
@@ -2487,6 +2487,7 @@ export class AccountService {
                 where: {
                   cardNumber: existingCard.cardNumber,
                   companyId: companyId,
+                  storeCode: existingCard.storeCode,
                 },
               });
 
