@@ -48,6 +48,8 @@ import { RegisterCustomerDto } from '../api/dto/RegisterCustomerDto';
 import { CreateCompanyTierDto } from './dto/CreateCompanyTierDto';
 import { CreateStoreMasterDto } from './dto/CreateStoreMasterDto';
 import { UpdateStoreMasterDto } from './dto/UpdateStoreDto';
+import { CreateRewardActionDto } from './dto/createRewardActionDto';
+import { AssignCompanyRewardActionDto } from './dto/companyRewardActionDto';
 
 @Controller('admin')
 export class AdminController {
@@ -421,5 +423,22 @@ export class AdminController {
   ) {
     this.logger.log('adminUserList');
     return this._adminService.storeList(companyId, req);
+  }
+  @Post('reward-actions')
+  // @UseGuards(JwtAuthGuard)
+  createRewardAction(@Body() dto: CreateRewardActionDto) {
+    return this._adminService.createRewardAction(dto);
+  }
+
+  @Post('company-reward-actions')
+  // @UseGuards(JwtAuthGuard)
+  assignActionToCompany(@Body() dto: AssignCompanyRewardActionDto) {
+    return this._adminService.assignActionToCompany(dto);
+  }
+
+  @Get('company-reward-actions/:companyId')
+  @UseGuards(JwtAuthGuard)
+  getCompanyActions(@Query('companyId') companyId: number) {
+    return this._adminService.getCompanyActions(companyId);
   }
 }

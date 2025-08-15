@@ -79,6 +79,10 @@ import { StoreMasterEntity } from './Entity/StoreMasterEntity';
 import { CreateStoreMasterDto } from './dto/CreateStoreMasterDto';
 import { UpdateStoreMasterDto } from './dto/UpdateStoreDto';
 import { JwtService } from '@nestjs/jwt';
+import { RewardActionMasterEntity } from './Entity/RewardActionMasterEntity';
+import { CreateRewardActionDto } from './dto/createRewardActionDto';
+import { AssignCompanyRewardActionDto } from './dto/companyRewardActionDto';
+import { CompanyRewardActionEntity } from './Entity/CompanyRewardMasterEntity';
 
 interface EntryType {
   createdAt: Date;
@@ -133,6 +137,10 @@ export class AdminService {
     private readonly LoyaltyCardTopupMasterEntityRepository: Repository<LoyaltyCardTopupMasterEntity>,
     @InjectRepository(StoreMasterEntity)
     private readonly StoreMasterEntityRepository: Repository<StoreMasterEntity>,
+    @InjectRepository(CompanyRewardActionEntity)
+    private readonly CompanyRewardActionEntityRepository: Repository<CompanyRewardActionEntity>,
+    @InjectRepository(RewardActionMasterEntity)
+    private readonly RewardActionMasterEntityRepository: Repository<RewardActionMasterEntity>,
   ) {
     this.transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
@@ -2100,5 +2108,35 @@ Powered by Harij Softech.`,
       status: 200,
       data: data,
     };
+  }
+  async createRewardAction(dto: CreateRewardActionDto) {
+    const action = this.RewardActionMasterEntityRepository.create({
+      actionName: dto.actionName,
+      defaultPoints: dto.defaultPoints,
+    });
+    return await this.RewardActionMasterEntityRepository.save(action);
+  }
+  async assignActionToCompany(dto: AssignCompanyRewardActionDto) {
+    const action = await this.RewardActionMasterEntityRepository.findOneBy({
+      id: dto.actionId,
+    });
+    if (!action) {
+      throw new Error(`Action with ID ${dto.actionId} not found`);
+    }
+
+    const mapping = this.CompanyRewardActionEntityRepository.create({
+      companyId: dto.companyId,
+      action, // pass the full entity
+      points: dto.points,
+    });
+
+    return await this.CompanyRewardActionEntityRepository.save(mapping);
+  }
+
+  async getCompanyActions(companyId: number) {
+    return await this.CompanyRewardActionEntityRepository.find({
+      where: { companyId },
+      relations: ['action'],
+    });
   }
 }

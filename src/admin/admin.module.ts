@@ -24,6 +24,8 @@ import { JwtStrategy } from './auth/local.strategy';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { jwtConfig } from './auth/jwt.config';
+import { RewardActionMasterEntity } from './Entity/RewardActionMasterEntity';
+import { CompanyRewardActionEntity } from './Entity/CompanyRewardMasterEntity';
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -47,6 +49,8 @@ import { jwtConfig } from './auth/jwt.config';
       BonusRecordMasterEntity,
       LoyaltyCardTopupMasterEntity,
       StoreMasterEntity,
+      CompanyRewardActionEntity,
+      RewardActionMasterEntity,
     ]),
   ],
   controllers: [AdminController],

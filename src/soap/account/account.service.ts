@@ -2376,7 +2376,12 @@ export class AccountService {
       storeCode,
     );
   }
+
   async saveBillWithItems(parsedRequest: any) {
+    console.log('parsedRequest: ', parsedRequest);
+    const decodedToken = this.decodeSecurityToken(parsedRequest.SecurityToken);
+    const companyId = decodedToken.companyId;
+    console.log('companyId: ', companyId);
     const master = new BillMasterEntity();
 
     master.userName = parsedRequest.UserName || '';
@@ -2404,6 +2409,66 @@ export class AccountService {
 
     const savedMaster = await this.BillMasterEntityRepository.save(master);
 
+    // 1️⃣ Find company tier
+
+    const billValue = master.billValue;
+    console.log('billValue: ', billValue);
+
+    let tier = await this.CompanyTierMasterEntityRepository.findOne({
+      where: {
+        companyId: companyId,
+        fromAmount: LessThanOrEqual(billValue),
+        toAmount: MoreThanOrEqual(billValue),
+      },
+    });
+
+    console.log('tier (exact match): ', tier);
+
+    // 🛠 Fallback: If no exact tier found, get highest tier
+    if (!tier) {
+      tier = await this.CompanyTierMasterEntityRepository.findOne({
+        where: { companyId },
+        order: { fromAmount: 'DESC' }, // highest tier
+      });
+      console.log('tier (fallback highest): ', tier);
+    }
+    if (tier) {
+      const topUpPercent = tier.topupPercent;
+      const topUpValue = (billValue * topUpPercent) / 100;
+
+      // 2️⃣ Find existing loyalty card entry
+      const existingCard =
+        await this.LoyaltyCardTopupMasterEntityRepository.findOne({
+          where: {
+            companyId: companyId,
+            mobileNumber: parsedRequest.MobileNumber, // match on mobile
+          },
+          order: { createdAt: 'DESC' }, // get latest
+        });
+
+      console.log('existingCard: ', existingCard);
+      if (existingCard) {
+        // 4️⃣ Insert new entry
+        const newCard = this.LoyaltyCardTopupMasterEntityRepository.create({
+          companyId: companyId,
+          mobileNumber: existingCard.mobileNumber,
+          cardNumber: existingCard.cardNumber,
+          cardType: existingCard.cardType,
+          shoppingAmount: billValue,
+          discountedShoppingValue:
+            billValue - (master.pointsValueRedeemed ?? 0),
+          topupPercent: topUpPercent, // ✅ match entity field name
+          topupValue: topUpValue, // ✅ match entity field name
+          currentAmount: topUpValue,
+          validTill: new Date('9999-08-15'), // date type
+          storeCode: master.storeCode,
+        });
+
+        await this.LoyaltyCardTopupMasterEntityRepository.save(newCard);
+      }
+    }
+
+    // Save bill items
     const itemsArray = Array.isArray(
       parsedRequest.TransactionItems.LogicTransactionItem,
     )
