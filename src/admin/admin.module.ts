@@ -26,6 +26,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { jwtConfig } from './auth/jwt.config';
 import { RewardActionMasterEntity } from './Entity/RewardActionMasterEntity';
 import { CompanyRewardActionEntity } from './Entity/CompanyRewardMasterEntity';
+import { RewardActionHistoryMasterEntity } from './Entity/RewardActionHistoryMasterEntity';
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -51,6 +52,7 @@ import { CompanyRewardActionEntity } from './Entity/CompanyRewardMasterEntity';
       StoreMasterEntity,
       CompanyRewardActionEntity,
       RewardActionMasterEntity,
+      RewardActionHistoryMasterEntity,
     ]),
   ],
   controllers: [AdminController],

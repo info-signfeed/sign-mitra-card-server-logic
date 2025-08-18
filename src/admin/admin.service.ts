@@ -2116,21 +2116,36 @@ Powered by Harij Softech.`,
     });
     return await this.RewardActionMasterEntityRepository.save(action);
   }
-  async assignActionToCompany(dto: AssignCompanyRewardActionDto) {
-    const action = await this.RewardActionMasterEntityRepository.findOneBy({
-      id: dto.actionId,
-    });
-    if (!action) {
-      throw new Error(`Action with ID ${dto.actionId} not found`);
+  async assignActionToCompany(
+    dto: AssignCompanyRewardActionDto[] | AssignCompanyRewardActionDto,
+  ) {
+    const dtos = Array.isArray(dto) ? dto : [dto]; // normalize to array
+
+    const mappings = [];
+
+    for (const d of dtos) {
+      const action = await this.RewardActionMasterEntityRepository.findOneBy({
+        id: d.actionId,
+      });
+
+      if (!action) {
+        throw new Error(`Action with ID ${d.actionId} not found`);
+      }
+
+      const mapping = this.CompanyRewardActionEntityRepository.create({
+        companyId: d.companyId,
+        action, // pass entity relation
+        points: d.points,
+      });
+
+      mappings.push(mapping);
     }
 
-    const mapping = this.CompanyRewardActionEntityRepository.create({
-      companyId: dto.companyId,
-      action, // pass the full entity
-      points: dto.points,
-    });
-
-    return await this.CompanyRewardActionEntityRepository.save(mapping);
+    const data = await this.CompanyRewardActionEntityRepository.save(mappings); // bulk insert
+    return {
+      messsage: 'success',
+      status: 200,
+    };
   }
 
   async getCompanyActions(companyId: number) {

@@ -432,7 +432,9 @@ export class AdminController {
 
   @Post('company-reward-actions')
   // @UseGuards(JwtAuthGuard)
-  assignActionToCompany(@Body() dto: AssignCompanyRewardActionDto) {
+  async assignActionToCompany(
+    @Body() dto: AssignCompanyRewardActionDto[] | AssignCompanyRewardActionDto,
+  ) {
     return this._adminService.assignActionToCompany(dto);
   }
 

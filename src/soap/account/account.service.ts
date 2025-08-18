@@ -48,6 +48,9 @@ import { JwtService } from '@nestjs/jwt';
 import { RegisterCustomerDto } from 'src/api/dto/RegisterCustomerDto';
 import { BillMasterEntity } from './Entity/billMasterEntity';
 import { BillItemEntity } from './Entity/billItemMasterEntity';
+import { CompanyRewardActionEntity } from 'src/admin/Entity/CompanyRewardMasterEntity';
+import { RewardActionMasterEntity } from 'src/admin/Entity/RewardActionMasterEntity';
+import { RewardActionHistoryMasterEntity } from 'src/admin/Entity/RewardActionHistoryMasterEntity';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 const otpStore = new Map<
@@ -101,6 +104,12 @@ export class AccountService {
     private readonly BillMasterEntityRepository: Repository<BillMasterEntity>,
     @InjectRepository(BillItemEntity)
     private readonly BillItemEntityRepository: Repository<BillItemEntity>,
+    @InjectRepository(CompanyRewardActionEntity)
+    private readonly CompanyRewardActionEntityRepository: Repository<CompanyRewardActionEntity>,
+    @InjectRepository(RewardActionMasterEntity)
+    private readonly RewardActionMasterEntityRepository: Repository<RewardActionMasterEntity>,
+    @InjectRepository(RewardActionHistoryMasterEntity)
+    private readonly RewardActionHistoryMasterEntityRepository: Repository<RewardActionHistoryMasterEntity>,
   ) {}
 
   async registerCustomer(requestData: RegisterCustomerDto) {
@@ -285,36 +294,60 @@ export class AccountService {
     }
     console.log('ll', requestData.cardType);
     if (Number(requestData.cardType) === 2) {
-      // Step 4: Loyalty card without plan
-      const loyaltyRecord = new LoyaltyCardTopupMasterEntity();
-      console.log('loyaltyRecord: ', loyaltyRecord);
-      loyaltyRecord.companyId = companyId;
-      loyaltyRecord.mobileNumber = mobileNumber;
-      loyaltyRecord.cardNumber = cardNumber;
-      loyaltyRecord.cardType = 'loyalty';
-      loyaltyRecord.shoppingAmount = 0;
-      loyaltyRecord.topupPercent = 0;
-      loyaltyRecord.topupValue = 0;
-      loyaltyRecord.currentAmount = 0;
-      loyaltyRecord.storeCode = requestData.storeCode;
-      // loyaltyRecord.validTill = null;
+      //  1. Check company reward action for "signup" using TypeORM QueryBuilder
+      const signupActionMapping =
+        await this.CompanyRewardActionEntityRepository.createQueryBuilder('cra')
+          .leftJoinAndSelect('cra.action', 'action')
+          .where('cra.companyId = :companyId', { companyId })
+          .andWhere('LOWER(action.actionName) = :actionName', {
+            actionName: 'signup',
+          })
+          .getOne();
+
+      let signupPoints = 0;
+
+      if (signupActionMapping) {
+        console.log('signupActionMapping: ', signupActionMapping);
+        //  Company-specific signup points
+        signupPoints = signupActionMapping.points;
+      } else {
+        // fallback → RewardActionMaster default
+        const signupMaster =
+          await this.RewardActionMasterEntityRepository.findOne({
+            where: { actionName: 'signup' },
+          });
+        signupPoints = signupMaster?.defaultPoints || 0;
+        console.log('signupPoints: ', signupPoints);
+      }
+
+      // 2. Save loyalty record with points
+      const loyaltyRecord = this.LoyaltyCardTopupMasterEntityRepository.create({
+        companyId,
+        mobileNumber,
+        cardNumber,
+        cardType: 'loyalty',
+        shoppingAmount: 0,
+        topupPercent: 0,
+        topupValue: 0,
+        validTill: '9999-12-12',
+        currentAmount: signupPoints, //  assign signup points here
+        storeCode: requestData.storeCode,
+      });
 
       await this.LoyaltyCardTopupMasterEntityRepository.save(loyaltyRecord);
+
       pointText = loyaltyRecord.currentAmount.toString() || '0';
+
+      // 3. Send SMS notification
       const company = await this.CompanyMasterEntityRepository.findOne({
         where: { id: companyId },
       });
-      if (requestData.cardType === 2) {
-        await this.sendSmsTemplate(
-          mobileNumber,
-          companyId,
-          'register-customer',
-          {
-            customer_name: newCustomer.customerName,
-            company_name: company?.companyName || '',
-          },
-        );
-      }
+
+      await this.sendSmsTemplate(mobileNumber, companyId, 'register-customer', {
+        customer_name: newCustomer.customerName,
+        company_name: company?.companyName || '',
+        total_point: pointText,
+      });
     }
 
     return { message: 'success', status: 200 };
@@ -1348,7 +1381,7 @@ export class AccountService {
       );
     }
 
-    // ✅ Fetch customer by either
+    //  Fetch customer by either
     const customer = await this.RegisterCustomerEntityRepository.findOne({
       where: [{ mobileNumber }, { cardNumber }],
     });
@@ -1359,13 +1392,13 @@ export class AccountService {
     const cardType = Number(customer.cardType);
     const redeemValue = Number(redeemPayload.redeemValue);
 
-    // ✅ Plan check
+    //  Plan check
     const plan = await this.LoyaltyPlanMasterEntityRepository.findOne({
       where: { id: customer.planId, companyId: customer.companyId },
     });
     const isOneTimeRedeem = plan?.isOneTimeRedeem === 1;
 
-    // ✅ Monthly limit logic
+    //  Monthly limit logic
     if (!isOneTimeRedeem && cardType === 1) {
       let monthlyLimit = 0;
 
@@ -1434,7 +1467,7 @@ export class AccountService {
       }
     }
 
-    // ✅ OTP logic
+    //  OTP logic
     const otp = Math.floor(10000 + Math.random() * 90000).toString();
     const expiresAt = Date.now() + 5 * 60 * 1000;
 
@@ -1444,7 +1477,7 @@ export class AccountService {
       redeemPayload: { ...redeemPayload, mobileNumber },
     });
 
-    // ✅ Balance calculation
+    //  Balance calculation
     let currentAmount = 0;
     if (cardType === 1) {
       const purchasePlan = await this.RedeemPointEntityRepository.findOne({
@@ -2383,7 +2416,6 @@ export class AccountService {
     const companyId = decodedToken.companyId;
     console.log('companyId: ', companyId);
     const master = new BillMasterEntity();
-
     master.userName = parsedRequest.UserName || '';
     master.billNo = parsedRequest.BillNo;
     master.transactionDate = new Date(parsedRequest.TransactionDate);
@@ -2457,8 +2489,8 @@ export class AccountService {
           shoppingAmount: billValue,
           discountedShoppingValue:
             billValue - (master.pointsValueRedeemed ?? 0),
-          topupPercent: topUpPercent, // ✅ match entity field name
-          topupValue: topUpValue, // ✅ match entity field name
+          topupPercent: topUpPercent, //  match entity field name
+          topupValue: topUpValue, //  match entity field name
           currentAmount: topUpValue,
           validTill: new Date('9999-08-15'), // date type
           storeCode: master.storeCode,
@@ -2467,7 +2499,7 @@ export class AccountService {
         const savedTopup =
           await this.LoyaltyCardTopupMasterEntityRepository.save(newCard);
 
-        // ✅ Send SMS here (copied from shoppingWithoutOtpShopping)
+        //  Send SMS here (copied from shoppingWithoutOtpShopping)
         const customer = await this.RegisterCustomerEntityRepository.findOne({
           where: { mobileNumber: existingCard.mobileNumber },
         });

@@ -22,6 +22,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from '../auth/local.strategy';
 import { BillMasterEntity } from './Entity/billMasterEntity';
 import { BillItemEntity } from './Entity/billItemMasterEntity';
+import { RewardActionMasterEntity } from 'src/admin/Entity/RewardActionMasterEntity';
+import { CompanyRewardActionEntity } from 'src/admin/Entity/CompanyRewardMasterEntity';
+import { RewardActionHistoryMasterEntity } from 'src/admin/Entity/RewardActionHistoryMasterEntity';
 
 @Module({
   imports: [
@@ -42,6 +45,9 @@ import { BillItemEntity } from './Entity/billItemMasterEntity';
       CompanySmsTemplateEntity,
       BillMasterEntity,
       BillItemEntity,
+      RewardActionMasterEntity,
+      CompanyRewardActionEntity,
+      RewardActionHistoryMasterEntity,
     ]),
     AdminModule,
     ApiModule,
